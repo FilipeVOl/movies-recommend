@@ -1,0 +1,127 @@
+[
+    {
+        "id": 1,
+        "name": "Joaquim Silva",
+        "age": 32,
+        "liked_movies": [
+            {
+                "id": 19995,
+                "title": "Avatar",
+                "cast_names": "Sam Worthington, Zoe Saldana, Sigourney Weaver, Stephen Lang, Michelle Rodriguez, Giovanni Ribisi, Joel David Moore, CCH Pounder, Wes Studi, Laz Alonso",
+                "crew": "James Cameron",
+                "cast_count": 83,
+                "genre": "Sci-Fi",
+                "age_rating": 12
+            }
+        ]
+    },
+    {
+        "id": 2,
+        "name": "Maria Santos",
+        "age": 27,
+        "liked_movies": [
+            {
+                "id": 285,
+                "title": "Pirates of the Caribbean: At World's End",
+                "cast_names": "Johnny Depp, Orlando Bloom, Keira Knightley, Stellan Skarsgård, Chow Yun-fat, Bill Nighy, Geoffrey Rush, Jack Davenport, Kevin McNally, Tom Hollander",
+                "crew": "Gore Verbinski",
+                "cast_count": 34,
+                "genre": "Adventure",
+                "age_rating": 12
+            },
+            {
+                "id": 206647,
+                "title": "Spectre",
+                "cast_names": "Daniel Craig, Christoph Waltz, Léa Seydoux, Ralph Fiennes, Monica Bellucci, Ben Whishaw, Naomie Harris, Dave Bautista, Andrew Scott, Rory Kinnear",
+                "crew": "Sam Mendes",
+                "cast_count": 83,
+                "genre": "Action",
+                "age_rating": 14
+            }
+        ]
+    },
+    {
+        "id": 3,
+        "name": "Pedro Oliveira",
+        "age": 41,
+        "liked_movies": [
+            {
+                "id": 49026,
+                "title": "The Dark Knight Rises",
+                "cast_names": "Christian Bale, Michael Caine, Gary Oldman, Anne Hathaway, Tom Hardy, Marion Cotillard, Joseph Gordon-Levitt, Morgan Freeman, Cillian Murphy, Juno Temple",
+                "crew": "Christopher Nolan",
+                "cast_count": 158,
+                "genre": "Action",
+                "age_rating": 14
+            },
+            {
+                "id": 49529,
+                "title": "John Carter",
+                "cast_names": "Taylor Kitsch, Lynn Collins, Samantha Morton, Willem Dafoe, Thomas Haden Church, Mark Strong, Ciarán Hinds, Dominic West, James Purefoy, Bryan Cranston",
+                "crew": "Andrew Stanton",
+                "cast_count": 27,
+                "genre": "Sci-Fi",
+                "age_rating": 12
+            }
+        ]
+    },
+    {
+        "id": 4,
+        "name": "Ana Costa",
+        "age": 23,
+        "liked_movies": [
+            {
+                "id": 559,
+                "title": "Spider-Man 3",
+                "cast_names": "Tobey Maguire, Kirsten Dunst, James Franco, Thomas Haden Church, Topher Grace, Bryce Dallas Howard, Rosemary Harris, James Cromwell, J.K. Simmons, Theresa Russell",
+                "crew": "Sam Raimi",
+                "cast_count": 143,
+                "genre": "Action",
+                "age_rating": 12
+            },
+            {
+                "id": 38757,
+                "title": "Tangled",
+                "cast_names": "Zachary Levi, Mandy Moore, Donna Murphy, Ron Perlman, M.C. Gainey, Jeffrey Tambor, Brad Garrett, Paul F. Tompkins, Richard Kiel, Delaney Rose Stein",
+                "crew": "Byron Howard",
+                "cast_count": 13,
+                "genre": "Animation",
+                "age_rating": 0
+            }
+        ]
+    },
+    {
+        "id": 5,
+        "name": "Carlos Mendes",
+        "age": 35,
+        "liked_movies": [
+            {
+                "id": 99861,
+                "title": "Avengers: Age of Ultron",
+                "cast_names": "Robert Downey Jr., Chris Hemsworth, Mark Ruffalo, Chris Evans, Scarlett Johansson, Jeremy Renner, James Spader, Samuel L. Jackson, Don Cheadle, Aaron Taylor-Johnson",
+                "crew": "Joss Whedon",
+                "cast_count": 72,
+                "genre": "Action",
+                "age_rating": 12
+            },
+            {
+                "id": 767,
+                "title": "Harry Potter and the Half-Blood Prince",
+                "cast_names": "Daniel Radcliffe, Rupert Grint, Emma Watson, Tom Felton, Michael Gambon, Jim Broadbent, Helena Bonham Carter, Robbie Coltrane, Maggie Smith, Alan Rickman",
+                "crew": "David Yates",
+                "cast_count": 49,
+                "genre": "Fantasy",
+                "age_rating": 10
+            },
+            {
+                "id": 209112,
+                "title": "Batman v Superman: Dawn of Justice",
+                "cast_names": "Ben Affleck, Henry Cavill, Gal Gadot, Amy Adams, Jesse Eisenberg, Diane Lane, Jeremy Irons, Laurence Fishburne, Holly Hunter, Scoot McNairy",
+                "crew": "Zack Snyder",
+                "cast_count": 152,
+                "genre": "Action",
+                "age_rating": 14
+            }
+        ]
+    }
+]
