@@ -1,8 +1,31 @@
 import { NextRequest, NextResponse } from "next/server";
-import { query } from "@/lib/db";
-import { toSql } from "pgvector/pg";
+import {
+  getMovieVectorsByIds,
+  upsertMovieVectors,
+} from "@/lib/repositories/movieVectorsRepo";
+import { parseVectorPayload } from "@/lib/validators/requestValidators";
 
-const VECTOR_DIM = 256;
+/** GET /api/movies/vectors?ids=1,2,3 - Busca vetores por movie_id */
+export async function GET(request: NextRequest) {
+  try {
+    const idsParam = request.nextUrl.searchParams.get("ids") ?? "";
+    const ids = idsParam
+      .split(",")
+      .map((value) => parseInt(value.trim(), 10))
+      .filter((value) => Number.isFinite(value));
+
+    if (ids.length === 0) {
+      return NextResponse.json({ data: [] });
+    }
+
+    const result = await getMovieVectorsByIds(ids);
+
+    return NextResponse.json({ data: result.rows });
+  } catch (err) {
+    console.error("Vectors fetch error:", err);
+    return NextResponse.json({ error: String(err) }, { status: 500 });
+  }
+}
 
 /** POST /api/movies/vectors - Salva vetores do modelo (encodeMovie) em movie_vectors */
 export async function POST(request: NextRequest) {
@@ -23,7 +46,7 @@ export async function POST(request: NextRequest) {
         { status: 400 }
       );
     }
-    const vectors = body.vectors as { movie_id?: number; id?: number; vector?: number[]; encoding?: number[] }[];
+    const vectors = parseVectorPayload(body);
 
     if (!Array.isArray(vectors) || vectors.length === 0) {
       return NextResponse.json(
@@ -32,31 +55,7 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    for (const item of vectors) {
-      const movieId = item.movie_id ?? item.id;
-      const vector = item.vector ?? item.encoding;
-
-      if (typeof movieId !== "number" || !Array.isArray(vector)) {
-        return NextResponse.json(
-          { error: "Each item must have movie_id (number) and vector or encoding (number[])" },
-          { status: 400 }
-        );
-      }
-
-      const padded = [...vector];
-      while (padded.length < VECTOR_DIM) padded.push(0);
-      const slice = padded.slice(0, VECTOR_DIM);
-
-      await query(
-        `INSERT INTO movie_vectors (movie_id, vector, dimensions)
-         VALUES ($1, $2, $3)
-         ON CONFLICT (movie_id) DO UPDATE SET
-           vector = EXCLUDED.vector,
-           dimensions = EXCLUDED.dimensions,
-           updated_at = NOW()`,
-        [movieId, toSql(slice), vector.length]
-      );
-    }
+    await upsertMovieVectors(vectors);
 
     return NextResponse.json({
       ok: true,

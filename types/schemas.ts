@@ -14,12 +14,12 @@ type User = Readonly<{
 interface Movie {
   id: number;
   title: string;
-  cast_names: string;
-  director: string;
-  cast_count: number;
-  genre: string;
-  age_rating: number;
-  created_at: Date;
+  cast_names: string | null;
+  director: string | null;
+  cast_count: number | null;
+  genre: string | null;
+  age_rating: number | null;
+  created_at?: Date;
 }
 
 interface MovieVector {

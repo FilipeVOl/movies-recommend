@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useRef } from "react";
+import { useRef } from "react";
 import MovieCard from "./MovieCard";
 import type { Movie } from "./MovieCard";
 
@@ -8,7 +8,7 @@ type RecommendationPanelProps = {
   userId: number | null;
   likedMovieIds: Set<number>;
   onToggleLike: (movieId: number) => void;
-  refreshKey: number;
+  isTraining: boolean;
   workerRecommendations?: Movie[];
 };
 
@@ -16,36 +16,11 @@ export default function RecommendationPanel({
   userId,
   likedMovieIds,
   onToggleLike,
-  refreshKey,
+  isTraining,
   workerRecommendations = [],
 }: RecommendationPanelProps) {
-  const [apiRecommendations, setApiRecommendations] = useState<Movie[]>([]);
-  const [loading, setLoading] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
-
-  const recommendations = workerRecommendations.length > 0 ? workerRecommendations : apiRecommendations;
-
-  useEffect(() => {
-    if (!userId) {
-      setApiRecommendations([]);
-      return;
-    }
-
-    const fetchRecs = async () => {
-      setLoading(true);
-      try {
-        const res = await fetch(`/api/users/${userId}/recommendations`);
-        const data = await res.json();
-        setApiRecommendations(Array.isArray(data) ? data : []);
-      } catch (err) {
-        console.error("Failed to load recommendations:", err);
-      } finally {
-        setLoading(false);
-      }
-    };
-
-    fetchRecs();
-  }, [userId, refreshKey]);
+  const recommendations = workerRecommendations;
 
   const scroll = (dir: "left" | "right") => {
     scrollRef.current?.scrollBy({
@@ -89,14 +64,14 @@ export default function RecommendationPanel({
         )}
       </div>
 
-      {loading && recommendations.length === 0 ? (
+      {isTraining && recommendations.length === 0 ? (
         <div className="flex items-center justify-center py-12">
           <div className="h-6 w-6 animate-spin rounded-full border-2 border-zinc-300 border-t-indigo-600" />
         </div>
       ) : recommendations.length === 0 ? (
         <div className="rounded-xl border border-dashed border-zinc-300 bg-zinc-50 py-10 text-center dark:border-zinc-700 dark:bg-zinc-900/50">
           <p className="text-sm text-zinc-400">
-            No recommendations yet. Like more movies to get personalized suggestions!
+            No recommendations yet. Keep liking movies to improve worker suggestions.
           </p>
         </div>
       ) : (

@@ -18,7 +18,7 @@ const events = {
   recommend: 'recommend',
   tfvisData: 'tfvis:data',
   tfvisLogs: 'tfvis:logs',
-}
+} as const;
 
 const workerEvents = {
   trainingComplete: 'training:complete',
@@ -28,7 +28,7 @@ const workerEvents = {
   progressUpdate: 'progress:update',
   tfVisData: 'tfvis:data',
   tfVisLogs: 'tfvis:logs',
-}
+} as const;
 
 const BATCH_SIZE = 100;
 

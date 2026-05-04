@@ -1,135 +1,256 @@
 # Movies Recommend
 
-Sistema de recomendação de filmes baseado em modelo neural e busca vetorial. O usuário curte filmes e recebe sugestões personalizadas com base em gênero, classificação etária, diretor e perfil de idade dos usuários que curtiram cada filme.
+Sistema de recomendação de filmes com arquitetura híbrida:
+- **treino e score no Web Worker** (TensorFlow.js),
+- **persistência vetorial no PostgreSQL + pgvector**,
+- **reranqueamento vetorial no backend** para consolidar o top 3 final.
 
-## O que o projeto faz
+Este README está estruturado para uso técnico e apresentação em palestra.
 
-- **Treino de modelo neural** (TensorFlow.js) no browser via Web Worker
-- **Encoding de filmes** em vetores usando: gênero (40%), classificação etária (30%), diretor (20%), idade média dos usuários (10%)
-- **Armazenamento de vetores** na tabela `movie_vectors` (PostgreSQL + pgvector)
-- **Recomendações** via similaridade de cosseno entre vetores ou predição do modelo neural
-- **Interface** para selecionar usuário, curtir filmes e visualizar recomendações
+## 1) Problema e proposta
 
-## Tecnologias
+O projeto resolve um cenário clássico de recomendação personalizada:
+- o usuário seleciona um perfil,
+- curte filmes,
+- recebe sugestões de novos títulos alinhadas ao padrão de preferência aprendido.
 
-| Stack | Tecnologia |
-|-------|------------|
-| Frontend | Next.js 16, React 19, Tailwind CSS |
-| Backend | Next.js API Routes (Node.js) |
-| Banco de dados | PostgreSQL + pgvector |
-| ML | TensorFlow.js (browser + Node) |
-| Linguagem | TypeScript |
+A solução combina:
+- **modelo supervisionado** (probabilidade de like),
+- **busca vetorial** (proximidade entre embeddings),
+- **filtros de catálogo** para exploração de conteúdo.
 
-## Estrutura do projeto
+## 2) Stack e decisões técnicas
 
-```
-movies-recommend/
-├── app/
-│   ├── api/
-│   │   ├── movies/
-│   │   │   ├── route.ts          # GET filmes (listagem, busca)
-│   │   │   ├── vectors/route.ts  # POST vetores do modelo
-│   │   │   └── similar/route.ts  # GET filmes similares (por movieId)
-│   │   └── users/
-│   │       ├── route.ts          # GET/POST usuários
-│   │       ├── [id]/like/route.ts
-│   │       └── [id]/recommendations/route.ts  # GET recomendações
-│   ├── page.tsx                  # Página principal
-│   ├── layout.tsx
-│   └── globals.css
-├── components/
-│   ├── MovieCard.tsx
-│   ├── MovieGrid.tsx
-│   ├── RecommendationPanel.tsx
-│   └── UserSelector.tsx
-├── controller/
-│   └── WorkerController.ts        # Orquestra worker e eventos
-├── worker/
-│   └── modelTrainingWorker.ts    # Treino + encoding + recommend
-├── lib/
-│   ├── db.ts                     # Pool PostgreSQL
-│   └── helpers.ts                # normalize, averageVectors
-├── types/
-│   ├── constants.ts
-│   ├── Events.ts
-│   └── schemas.ts
-├── db/
-│   └── migrations/               # SQL migrations
-├── scripts/
-│   ├── create-database.ts
-│   ├── run-migrations.ts
-│   ├── reset-db.ts
-│   └── ingest-users.ts
-└── data/
-    ├── user.json                 # Dados de usuários (ingest)
-    └── tmdb_5000_credits.csv     # Dados de filmes
+| Camada | Tecnologia | Papel |
+|---|---|---|
+| Frontend | Next.js 16, React 19, Tailwind | UI, estado de sessão, interação |
+| Treino/Inferência | TensorFlow.js no Web Worker | Treino assíncrono e score de candidatos |
+| Backend | Next.js API Routes | Contratos HTTP, persistência e ranking vetorial |
+| Banco | PostgreSQL + pgvector | Dados relacionais + embeddings e distância vetorial |
+| Linguagem | TypeScript | Contratos tipados entre camadas |
+
+## 3) Arquitetura de alto nível
+
+```mermaid
+flowchart LR
+  UI[Next.js UI] --> Worker[Web Worker ML]
+  UI --> API[API Routes]
+  Worker -->|"POST /api/movies/vectors"| API
+  Worker -->|"POST /api/users/:id/recommendations"| API
+  API --> DB[(PostgreSQL + pgvector)]
+  DB --> API
+  API --> UI
 ```
 
-## Como rodar
+## 4) Como o modelo funciona
 
-### 1. Pré-requisitos
+### Encoding de features
 
+Cada filme é codificado no worker com pesos:
+- `genre`: **0.4**
+- `age_rating`: **0.3**
+- `director`: **0.2**
+- `idade média de quem curtiu`: **0.1**
+
+### Treino
+
+1. Worker carrega usuários (`/api/users`).
+2. Constrói contexto (`makeContext`) com índices e normalizações.
+3. Vetoriza filmes curtidos (deduplicados por `movie.id`).
+4. Gera dataset supervisionado:
+   - entrada: `userVector + movieVector`
+   - label: `1` se usuário curtiu, `0` caso contrário
+5. Treina rede neural (camadas densas com `relu` e saída `sigmoid`).
+6. Persiste embeddings em `movie_vectors`.
+
+### Inferência/recomendação
+
+1. Worker calcula score dos candidatos de catálogo.
+2. Seleciona candidatos mais fortes (threshold + fallback).
+3. Envia candidatos para backend.
+4. Backend faz reranqueamento vetorial no DB e retorna top 3.
+
+## 5) Papel do banco vetorial
+
+O `movie_vectors` é usado para:
+- armazenar embeddings gerados (ingest + worker),
+- calcular distâncias vetoriais (`<=>`) no `pgvector`,
+- suportar reranqueamento no endpoint de recomendação.
+
+Tabela de apoio:
+- `user_movie_scores`: guarda score do modelo por usuário/filme e distância associada.
+
+## 6) Fluxo funcional E2E
+
+### A) Boot da aplicação
+- carrega usuários,
+- dispara treino inicial,
+- habilita recomendações quando o treino termina.
+
+### B) Like/Unlike
+- `POST /api/users/[id]/like`,
+- atualiza estado da UI,
+- retrigger de treino/recomendação.
+
+### C) Recomendação
+- worker gera candidatos com score,
+- backend reranqueia vetorialmente,
+- UI exibe top 3 em `RecommendationPanel`.
+
+### D) Retrain manual
+- botão **Treinar modelo** na tela principal,
+- evita dependência de refresh de página.
+
+## 7) Estrutura de código (resumo)
+
+```text
+app/
+  api/
+    movies/
+      route.ts
+      vectors/route.ts
+    users/
+      route.ts
+      [id]/like/route.ts
+      [id]/recommendations/route.ts
+  page.tsx
+components/
+  MovieGrid.tsx
+  RecommendationPanel.tsx
+  MovieCard.tsx
+  UserSelector.tsx
+controller/
+  WorkerController.ts
+hooks/
+  useRecommendationsWorker.ts
+worker/
+  modelTrainingWorker.ts
+lib/
+  db.ts
+  helpers.ts
+  repositories/
+    movieVectorsRepo.ts
+    recommendationRepo.ts
+  services/
+    recommendationService.ts
+  validators/
+    requestValidators.ts
+db/migrations/
+scripts/
+```
+
+## 8) Execução local (sem Docker)
+
+### Pré-requisitos
 - Node.js 18+
-- PostgreSQL com extensão [pgvector](https://github.com/pgvector/pgvector)
+- PostgreSQL com extensão `vector`
 
-### 2. Variáveis de ambiente
-
-Copie o arquivo de exemplo e preencha:
+### Passos
 
 ```bash
 cp .env.example .env
-```
-
-Edite `.env` com suas credenciais do PostgreSQL.
-
-### 3. Banco de dados
-
-```bash
-# Criar banco (se não existir)
+npm install
 npm run db:create
-
-# Executar migrations
 npm run db:migrate
-
-# (Opcional) Resetar e rodar migrations
-npm run db:reset
-```
-
-### 4. Popular dados
-
-```bash
-# Ingerir usuários e filmes de data/user.json
 npm run ingest
+npm run dev
 ```
 
-### 5. Aplicação
+Abra: [http://localhost:3000](http://localhost:3000)
+
+## 9) Execução com Docker
 
 ```bash
-# Desenvolvimento
-npm run dev
-
-# Produção
-npm run build
-npm start
+docker compose up --build
 ```
 
-Acesse [http://localhost:3000](http://localhost:3000).
+O compose sobe:
+- `db` (Postgres + pgvector)
+- `app` (Next.js)
 
-### 6. Fluxo de uso
+No startup da app:
+1. `db:create`
+2. `db:migrate`
+3. `ingest`
+4. `dev`
 
-1. Abra o app no navegador
-2. O treino do modelo inicia automaticamente ao carregar usuários
-3. Selecione um usuário e curta filmes
-4. As recomendações aparecem no painel (3 filmes mais similares aos curtidos)
+Parar:
+```bash
+docker compose down
+```
 
-## APIs
+Apagar dados:
+```bash
+docker compose down -v
+```
 
-| Método | Endpoint | Descrição |
-|--------|----------|-----------|
-| GET | `/api/users` | Lista usuários com filmes curtidos |
-| POST | `/api/users` | Cria usuário |
-| POST | `/api/users/[id]/like` | Toggle like em filme |
-| GET | `/api/users/[id]/recommendations` | Recomendações (vetores) |
-| GET | `/api/movies` | Lista filmes |
-| POST | `/api/movies/vectors` | Salva vetores do modelo |
-| GET | `/api/movies/similar?movieId=X` | Filmes similares a X |
+## 10) API contracts (principais)
+
+### `GET /api/users`
+Lista usuários com `liked_movies`.
+
+### `POST /api/users`
+Cria usuário.
+Payload:
+```json
+{ "name": "Novo Usuario", "age": 29 }
+```
+
+### `POST /api/users/[id]/like`
+Alterna like de filme para usuário.
+Payload:
+```json
+{ "movieId": 49026 }
+```
+
+### `POST /api/users/[id]/recommendations`
+Recebe candidatos (`movie_id`, `score`), persiste score e reranqueia vetorialmente.
+
+### `GET /api/users/[id]/recommendations`
+Lê recomendações persistidas em cache para o usuário.
+
+### `GET /api/movies`
+Catálogo paginado com filtros:
+- `search`
+- `genre`
+- `director`
+- `cast` (nomes separados por vírgula)
+- `minAgeRating`
+- `maxAgeRating`
+
+### `POST /api/movies/vectors`
+Upsert de embeddings.
+
+### `GET /api/movies/vectors?ids=1,2,3`
+Busca embeddings por `movie_id`.
+
+## 11) Observabilidade para demo
+
+Durante a apresentação, vale mostrar:
+- progresso de treino no header,
+- logs do worker (epochs/loss/accuracy),
+- payload de candidatos e top 3 final,
+- `model_score` + `distance` no resultado.
+
+## 12) Limitações atuais
+
+- Dataset de exemplo reduzido para simulação.
+- Feature engineering ainda simples (não usa sinopse, keywords, embeddings semânticos externos).
+- Treino e inferência focados em execução local/browser.
+
+## 13) Próximos passos recomendados
+
+- Avaliação offline formal (Precision@K / Recall@K / NDCG).
+- Versionamento de encoder vetorial.
+- Batching de upsert vetorial para grande escala.
+- Testes automatizados para fluxos worker + API.
+- Camada de experiment tracking de hiperparâmetros e métricas.
+
+## 14) Roteiro de palestra (5-8 min)
+
+1. Problema e arquitetura híbrida (worker + pgvector).  
+2. Demonstração de treino e recomendação ao vivo.  
+3. Explicação do pipeline de score + reranqueamento vetorial.  
+4. Filtros de catálogo e comportamento da UI.  
+5. Lições de engenharia (tipagem, separação de camadas, responsabilidades).  
+6. Roadmap de evolução.  

@@ -1,5 +1,10 @@
 import { workerEvents } from "@/types/constants";
 import Events from "@/types/Events";
+import type {
+    RecommendEventPayload,
+    WorkerInboundMessage,
+    WorkerOutboundMessage,
+} from "@/types/worker";
 
 type WorkerControllerDeps = {
     worker: Worker;
@@ -14,10 +19,6 @@ export class WorkerController {
         this.#worker = worker;
         this.#events = events;
         this.#alreadyTrained = false;
-        this.init();
-    }
-
-    async init() {
         this.setupCallbacks();
     }
 
@@ -40,49 +41,50 @@ export class WorkerController {
                 return;
             }
             console.log("[WorkerController] Enviando recommend ao worker", data);
-            this.triggerRecommend(data as { userId?: number });
+            this.triggerRecommend(data);
         });
 
-        const eventsToIgnoreLogs = [
+        const eventsToIgnoreLogs = new Set<string>([
             workerEvents.progressUpdate,
             workerEvents.trainingLog,
             workerEvents.tfVisData,
             workerEvents.tfVisLogs,
             workerEvents.trainingComplete,
-        ]
-        this.#worker.onmessage = (event) => {
-            if (!eventsToIgnoreLogs.includes(event.data.type))
-                console.log(event.data);
+        ]);
+        this.#worker.onmessage = (event: MessageEvent<WorkerInboundMessage>) => {
+            const payload = event.data;
+            if (!eventsToIgnoreLogs.has(payload.type))
+                console.log(payload);
 
-            if (event.data.type === workerEvents.progressUpdate) {
-                this.#events.dispatchProgressUpdate(event.data.progress);
+            if (payload.type === workerEvents.progressUpdate) {
+                this.#events.dispatchProgressUpdate(payload.progress);
             }
 
-            if (event.data.type === workerEvents.trainingComplete) {
-                this.#events.dispatchTrainingComplete(event.data);
+            if (payload.type === workerEvents.trainingComplete) {
+                this.#events.dispatchTrainingComplete({ updated: payload.updated });
             }
 
-            // Handle tfvis data from the worker for initial visualization
-            if (event.data.type === workerEvents.tfVisData) {
-                this.#events.dispatchTFVisorData(event.data.data);
+            if (payload.type === workerEvents.tfVisData) {
+                this.#events.dispatchTFVisorData(payload.data);
             }
 
-            // Handle tfvis recommendation data
-            if (event.data.type === workerEvents.trainingLog) {
-                this.#events.dispatchTFVisLogs(event.data);
+            if (payload.type === workerEvents.trainingLog) {
+                this.#events.dispatchTFVisLogs(payload);
             }
-            if (event.data.type === workerEvents.recommend) {
-                this.#events.dispatchRecommendationsReady(event.data);
+            if (payload.type === workerEvents.recommend) {
+                this.#events.dispatchRecommendationsReady(payload);
             }
         };
     }
 
     triggerTrain() {
-        this.#worker.postMessage({ action: workerEvents.trainModel });
+        const command: WorkerOutboundMessage = { action: workerEvents.trainModel };
+        this.#worker.postMessage(command);
     }
 
-    triggerRecommend(data: { userId?: number }) {
-        this.#worker.postMessage({ action: workerEvents.recommend, user: data, userId: data.userId });
+    triggerRecommend(data: RecommendEventPayload) {
+        const command: WorkerOutboundMessage = { action: workerEvents.recommend, userId: data.userId };
+        this.#worker.postMessage(command);
     }
 
     terminate() {

@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { query } from "@/lib/db";
+import { parseLikePayload } from "@/lib/validators/requestValidators";
 
 export async function POST(
   request: NextRequest,
@@ -13,8 +14,9 @@ export async function POST(
   }
 
   try {
-    const body = await request.json();
-    const movieId = body.movieId;
+    const body = await request.json().catch(() => ({}));
+    const payload = parseLikePayload(body);
+    const movieId = payload?.movieId;
 
     if (!movieId) {
       return NextResponse.json(

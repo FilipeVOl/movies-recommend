@@ -1,7 +1,11 @@
-import { Movie, MovieVector, UserResponse } from "@/types/schemas";
+import { Movie, UserResponse } from "@/types/schemas";
 import { workerEvents } from "@/types/constants";
 import { normalize } from "@/lib/helpers";
 import * as tf from "@tensorflow/tfjs";
+import type {
+  WorkerOutboundMessage,
+  TrainingLogEventPayload,
+} from "@/types/worker";
 
 let _model: tf.LayersModel | null = null;
 let _context: ContextType | null = null;
@@ -24,6 +28,7 @@ type ContextType = {
   numDirectors: number;
   dimensions: number;
   movieVectors?: { title: string; meta: Movie; vector: number[] }[];
+  catalogMovies?: Movie[];
 }
 
 const WEIGHTS = {
@@ -31,7 +36,20 @@ const WEIGHTS = {
   ageRating: 0.3,
   director: 0.2,
   age: 0.1
-}
+};
+
+const safeDepth = (size: number) => Math.max(2, size);
+const toNumeric = (value: number | null | undefined, fallback = 0) =>
+  typeof value === "number" && Number.isFinite(value) ? value : fallback;
+
+const postRecommendEmpty = (userId: number) => {
+  postMessage({ type: workerEvents.recommend, userId, recommendations: [] });
+};
+
+const buildTrainCompletePayload = (updated: number) => ({
+  type: workerEvents.trainingComplete,
+  updated,
+});
 
 async function loadUsers() {
   const res = await fetch(`${API_BASE}/api/users`);
@@ -40,49 +58,63 @@ async function loadUsers() {
 }
 
 async function loadMovies(limit = 200, offset = 0): Promise<Movie[]> {
-  const res = await fetch(
-    `${API_BASE}/api/movies?limit=${limit}&offset=${offset}`
-  );
+  const res = await fetch(`${API_BASE}/api/movies?limit=${limit}&offset=${offset}`);
   if (!res.ok) throw new Error(`API error: ${res.status}`);
   const { data } = (await res.json()) as { data: Movie[] };
   return data;
+}
+
+async function loadAllCatalogMovies(batchSize = 200): Promise<Movie[]> {
+  const all: Movie[] = [];
+  let offset = 0;
+
+  while (true) {
+    const batch = await loadMovies(batchSize, offset);
+    if (batch.length === 0) break;
+    all.push(...batch);
+    offset += batch.length;
+    if (batch.length < batchSize) break;
+  }
+
+  return all;
 }
 
 function makeContext(movies: Movie[], users: UserResponse[]): ContextType {
   const ages = users.map((u) => u.age ?? 0);
   const minAge = Math.min(...ages);
   const maxAge = Math.max(...ages);
-  const minAgeRating = Math.min(...movies.map(movie => movie.age_rating));
-  const maxAgeRating = Math.max(...movies.map(movie => movie.age_rating));
+  const minAgeRating = Math.min(...movies.map((movie) => toNumeric(movie.age_rating)));
+  const maxAgeRating = Math.max(...movies.map((movie) => toNumeric(movie.age_rating)));
 
   const genres = [...new Set(movies.map((m) => m.genre).filter(Boolean))] as string[];
   const genreIndex = Object.fromEntries(genres.map((g, i) => [g, i]));
 
-  const ageRatings = [...new Set(movies.map(movie => movie.age_rating))]
+  const ageRatings = [...new Set(movies.map((movie) => toNumeric(movie.age_rating)))];
   const ageRatingIndex = Object.fromEntries(ageRatings.map((r, i) => [r, i]));
 
   const directors = [...new Set(movies.map((m) => m.director).filter(Boolean))] as string[];
   const directorIndex = Object.fromEntries(directors.map((d, i) => [d, i]));
 
   const midAge = (minAge + maxAge) / 2;
-  const ageSums: Record<string, number> = {}
-  const ageCounts: Record<string, number> = {}
+  const ageSums: Record<string, number> = {};
+  const ageCounts: Record<string, number> = {};
 
   users.forEach((user) => {
     user.liked_movies.forEach((movie) => {
-      ageSums[movie.title] = (ageSums[movie.title] || 0) + (user.age ?? 0);
-      ageCounts[movie.title] = (ageCounts[movie.title] || 0) + 1;
-    })
-  })
+      const key = movie.title ?? "";
+      ageSums[key] = (ageSums[key] || 0) + (user.age ?? 0);
+      ageCounts[key] = (ageCounts[key] || 0) + 1;
+    });
+  });
 
   const movieAvgAgeNorm = Object.fromEntries(
-    movies.map(movie => {
-      const avg = ageCounts[movie.title] ?
-      ageSums[movie.title] / ageCounts[movie.title] : midAge;
+    movies.map((movie) => {
+      const key = movie.title ?? "";
+      const avg = ageCounts[key] ? ageSums[key] / ageCounts[key] : midAge;
 
-      return [movie.title, normalize(avg, minAge, maxAge)]
+      return [key, normalize(avg, minAge, maxAge)];
     })
-  )
+  );
 
   return {
     minAgeRating,
@@ -98,13 +130,17 @@ function makeContext(movies: Movie[], users: UserResponse[]): ContextType {
     numGenres: genres.length,
     numAgeRatings: ageRatings.length,
     numDirectors: directors.length,
-    // Tamanho do vetor de cada filme: 1 (age_rating) + 1 (age) + genre one-hot + director one-hot
-    dimensions: 2 + Math.max(1, genres.length) + Math.max(1, directors.length),
+    // Tamanho do vetor de cada filme: 1 (age_rating) + 1 (age) + genre one-hot + director one-hot.
+    // oneHot no TensorFlow.js exige depth >= 2.
+    dimensions: 2 + safeDepth(genres.length) + safeDepth(directors.length),
   };
 }
 
-const oneHotWeight = (index: number, length: number, weight: number) =>
-  tf.oneHot(index, length).cast('float32').mul(weight);
+const oneHotWeight = (index: number, length: number, weight: number) => {
+  const depth = safeDepth(length);
+  const safeIndex = Math.max(0, Math.min(index, depth - 1));
+  return tf.oneHot(safeIndex, depth).cast('float32').mul(weight);
+};
 
 function encodeUser(user: UserResponse, context: ContextType) {
   const liked = Array.isArray(user.liked_movies) ? user.liked_movies : [];
@@ -125,18 +161,18 @@ function encodeMovie(movie: Movie, context: ContextType) {
   const age_rating = tf.tensor1d([arNorm * WEIGHTS.ageRating])
 
   const age = tf.tensor1d([
-    (context.movieAvgAgeNorm[movie.title] ?? 0.5) * WEIGHTS.age
-  ])
+    (context.movieAvgAgeNorm[movie.title ?? ""] ?? 0.5) * WEIGHTS.age
+  ]);
 
   const genre = oneHotWeight(
-    context.genreIndex[movie.genre] ?? 0, 
-    Math.max(1, context.numGenres), 
-    WEIGHTS.genre)
+    context.genreIndex[movie.genre ?? ""] ?? 0,
+    context.numGenres, 
+    WEIGHTS.genre);
 
   const director = oneHotWeight(
-    context.directorIndex[movie.director] ?? 0, 
-    Math.max(1, context.numDirectors), 
-    WEIGHTS.director)
+    context.directorIndex[movie.director ?? ""] ?? 0,
+    context.numDirectors, 
+    WEIGHTS.director);
 
   return tf.concat([age_rating, age, genre.flatten(), director.flatten()], 0) as tf.Tensor1D;
 }
@@ -164,7 +200,7 @@ function createTrainingData(context: ContextType): { xs: tf.Tensor2D; ys: tf.Ten
     ys: tf.tensor2d(labels, [labels.length, 1]),
     inputDimension: context.dimensions * 2
     // tamanho = userVector + movieVector
-  }
+  };
 }
 
 async function configureNeuralNetandTrain(trainData: { xs: tf.Tensor2D; ys: tf.Tensor2D; inputDimension: number }) {
@@ -203,7 +239,13 @@ async function configureNeuralNetandTrain(trainData: { xs: tf.Tensor2D; ys: tf.T
     shuffle: true,
     callbacks: {
       onEpochEnd: (epoch, logs) => {
-        postMessage({ type: workerEvents.trainingLog, epoch, loss: logs?.loss, accuracy: logs?.accuracy });
+        const payload: TrainingLogEventPayload = {
+          type: workerEvents.trainingLog,
+          epoch,
+          loss: logs?.loss,
+          accuracy: logs?.accuracy,
+        };
+        postMessage(payload);
       }
     }
   });
@@ -214,8 +256,19 @@ async function configureNeuralNetandTrain(trainData: { xs: tf.Tensor2D; ys: tf.T
 async function trainModel() {
   postMessage({ type: workerEvents.progressUpdate, progress: 50 });
   const users = await loadUsers();
-  const movies = await loadMovies();
+  const movieMap = new Map<number, Movie>();
+  users.forEach((user) => {
+    user.liked_movies.forEach((movie) => {
+      movieMap.set(movie.id, movie);
+    });
+  });
+  const movies = Array.from(movieMap.values());
+  if (movies.length === 0) {
+    postMessage(buildTrainCompletePayload(0));
+    return;
+  }
   const context = makeContext(movies, users);
+  context.catalogMovies = await loadAllCatalogMovies();
   context.movieVectors = movies.map(movie => {
     return {
       title: movie.title,
@@ -245,68 +298,120 @@ async function trainModel() {
     throw new Error(err.error || `Failed to save vectors: ${res.status}`);
   }
 
-  postMessage({ type: workerEvents.trainingComplete, updated: vectors.length });
+  postMessage(buildTrainCompletePayload(vectors.length));
 }
 
 
-async function recommend(data: { userId?: number; user?: { id?: number; userId?: number } }) {
-  const userId = data.userId ?? data.user?.id ?? data.user?.userId;
+async function recommend(data: { userId: number }) {
+  const userId = data.userId;
   console.log("[worker] recommend chamado, userId:", userId, "data:", data);
-  if (userId == null) return;
   try {
-    if (_model && _context) {
-      console.log("[recommend] Usando modelo neural");
-      const users = await loadUsers();
-      const user = users.find((u) => u.id === userId);
-      if (!user) return;
-      const userVector = encodeUser(user, _context);
-      if (!userVector) return;
-      const userData = Array.from(userVector.dataSync());
-      const likedIds = new Set(
-        (Array.isArray(user.liked_movies) ? user.liked_movies : []).map((m) => m.id)
-      );
-      const candidates = _context.movieVectors?.filter((mv) => !likedIds.has(mv.meta.id)) ?? [];
-      const inputs: number[][] = [];
-      const metas: { meta: Movie }[] = [];
-      for (const mv of candidates) {
-        const movieVector = Array.from(encodeMovie(mv.meta, _context).dataSync());
-        inputs.push([...userData, ...movieVector]);
-        metas.push({ meta: mv.meta });
-      }
-      if (inputs.length === 0) {
-        postMessage({ type: workerEvents.recommend, userId, recommendations: [] });
-        return;
-      }
-      const preds = _model.predict(tf.tensor2d(inputs)) as tf.Tensor;
-      const scores = Array.from(preds.dataSync());
-      const MIN_SCORE = 0.4;
-      const ranked = metas
-        .map((mv, i) => ({ meta: mv.meta, score: scores[i] ?? 0 }))
-        .filter(({ score }) => score >= MIN_SCORE)
-        .sort((a, b) => b.score - a.score)
-        .slice(0, 3)
-        .map(({ meta }) => meta);
-      postMessage({ type: workerEvents.recommend, userId, recommendations: ranked });
-    } else {
+    if (!_model || !_context) {
       console.log("[recommend] Modelo não disponível, fallback []");
-      postMessage({
-        type: workerEvents.recommend,
-        userId,
-        recommendations: [],
-      });
+      postRecommendEmpty(userId);
+      return;
     }
+
+    const users = await loadUsers();
+    const user = users.find((u) => u.id === userId);
+    if (!user) {
+      postRecommendEmpty(userId);
+      return;
+    }
+
+    const userVector = encodeUser(user, _context);
+    if (!userVector) {
+      postRecommendEmpty(userId);
+      return;
+    }
+
+    const userData = Array.from(userVector.dataSync());
+    const likedIds = new Set(
+      (Array.isArray(user.liked_movies) ? user.liked_movies : []).map((m) => m.id)
+    );
+    const candidates = (_context.catalogMovies ?? [])
+      .filter((movie) => !likedIds.has(movie.id))
+      .map((movie) => ({ meta: movie }));
+
+    if (candidates.length === 0) {
+      postRecommendEmpty(userId);
+      return;
+    }
+
+    const inputs: number[][] = [];
+    const metas: { meta: Movie; vector: number[] }[] = [];
+    for (const mv of candidates) {
+      const movieVector = Array.from(encodeMovie(mv.meta, _context).dataSync());
+      inputs.push([...userData, ...movieVector]);
+      metas.push({ meta: mv.meta, vector: movieVector });
+    }
+
+    const preds = _model.predict(tf.tensor2d(inputs)) as tf.Tensor;
+    const scores = Array.from(preds.dataSync());
+    const MIN_SCORE = 0.4;
+
+    const scored = metas
+      .map((mv, i) => ({ meta: mv.meta, vector: mv.vector, score: scores[i] ?? 0 }))
+      .sort((a, b) => b.score - a.score);
+
+    const aboveThreshold = scored.filter(({ score }) => score >= MIN_SCORE).slice(0, 100);
+    const selectedScored = aboveThreshold.length > 0 ? aboveThreshold : scored.slice(0, 100);
+
+    if (selectedScored.length === 0) {
+      postRecommendEmpty(userId);
+      return;
+    }
+
+    // Ensure selected candidates have vectors in DB before vector search.
+    const vectorUpsertRes = await fetch(`${API_BASE}/api/movies/vectors`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        vectors: selectedScored.map(({ meta, vector }) => ({
+          movie_id: meta.id,
+          vector,
+        })),
+      }),
+    });
+    if (!vectorUpsertRes.ok) {
+      const err = await vectorUpsertRes.json().catch(() => ({}));
+      throw new Error(err.error || `Vector upsert failed: ${vectorUpsertRes.status}`);
+    }
+
+    const recommendationRes = await fetch(`${API_BASE}/api/users/${userId}/recommendations`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        candidates: selectedScored.map(({ meta, score }) => ({
+          movie_id: meta.id,
+          score,
+        })),
+      }),
+    });
+    if (!recommendationRes.ok) {
+      const err = await recommendationRes.json().catch(() => ({}));
+      throw new Error(err.error || `Recommendations API failed: ${recommendationRes.status}`);
+    }
+    const responseData = await recommendationRes.json();
+    const recommendations = Array.isArray(responseData) ? responseData : [];
+
+    postMessage({ type: workerEvents.recommend, userId, recommendations });
   } catch (err) {
     console.error("Recommend error:", err);
-    postMessage({ type: workerEvents.recommend, userId, recommendations: [] });
+    postRecommendEmpty(userId);
   }
 }
 
-const handlers = {
+const handlers: Record<WorkerOutboundMessage["action"], (payload: WorkerOutboundMessage) => void | Promise<void>> = {
   [workerEvents.trainModel]: trainModel,
-  [workerEvents.recommend]: recommend,
+  [workerEvents.recommend]: (payload) => {
+    if ("userId" in payload) {
+      return recommend({ userId: payload.userId });
+    }
+  },
 };
 
-self.onmessage = (e: MessageEvent) => {
-  const { action, ...data } = e.data;
-  if (handlers[action]) handlers[action](data);
+self.onmessage = (e: MessageEvent<WorkerOutboundMessage>) => {
+  const payload = e.data;
+  handlers[payload.action]?.(payload);
 };

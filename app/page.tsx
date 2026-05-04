@@ -1,14 +1,13 @@
 "use client";
 
-import { useState, useEffect, useCallback, useRef } from "react";
+import { useState, useEffect, useCallback } from "react";
 import UserSelector from "@/components/UserSelector";
 import type { UserSummary } from "@/components/UserSelector";
 import MovieGrid from "@/components/MovieGrid";
 import MovieCard from "@/components/MovieCard";
-import type { Movie } from "@/components/MovieCard";
 import RecommendationPanel from "@/components/RecommendationPanel";
-import { WorkerController } from "@/controller/WorkerController";
-import Events from "@/types/Events";
+import { useRecommendationsWorker } from "@/hooks/useRecommendationsWorker";
+import type { Movie } from "@/types/schemas";
 
 type ApiUser = {
   id: number;
@@ -21,45 +20,8 @@ export default function Home() {
   const [users, setUsers] = useState<ApiUser[]>([]);
   const [selectedUserId, setSelectedUserId] = useState<number | null>(null);
   const [likedMovieIds, setLikedMovieIds] = useState<Set<number>>(new Set());
-  const [refreshKey, setRefreshKey] = useState(0);
-  const [trainingProgress, setTrainingProgress] = useState<number | null>(null);
-  const [workerRecommendations, setWorkerRecommendations] = useState<Movie[]>([]);
-  const controllerRef = useRef<WorkerController | null>(null);
-  const eventsRef = useRef<Events | null>(null);
-  const selectedUserIdRef = useRef<number | null>(null);
-  selectedUserIdRef.current = selectedUserId;
-
-  useEffect(() => {
-    const events = new Events();
-    eventsRef.current = events;
-    const worker = new Worker(
-      new URL("../worker/modelTrainingWorker.ts", import.meta.url)
-    );
-    const controller = WorkerController.init({ worker, events });
-    controllerRef.current = controller;
-
-    events.onProgressUpdate((progress) => setTrainingProgress(progress));
-    events.onTrainingComplete(() => setTrainingProgress(null));
-    events.onRecommendationsReady((data) => {
-      const d = data as { userId?: number; recommendations?: Movie[] };
-      if (d.userId === selectedUserIdRef.current) {
-        setWorkerRecommendations(Array.isArray(d.recommendations) ? d.recommendations : []);
-      }
-    });
-
-    return () => controller.terminate();
-  }, []);
-
-  useEffect(() => {
-    if (selectedUserId && trainingProgress === null && controllerRef.current) {
-      console.log("[page] Disparando recommend para userId:", selectedUserId);
-      eventsRef.current?.dispatchRecommend({ userId: selectedUserId });
-    }
-  }, [selectedUserId, trainingProgress, refreshKey]);
-
-  useEffect(() => {
-    setWorkerRecommendations([]);
-  }, [selectedUserId]);
+  const { trainingProgress, recommendations: workerRecommendations, triggerTrain } =
+    useRecommendationsWorker({ selectedUserId });
 
   useEffect(() => {
     const fetchUsers = async () => {
@@ -71,15 +33,15 @@ export default function Home() {
           setSelectedUserId(data[0].id);
         }
 
-        if (controllerRef.current && data.length > 0) {
-          controllerRef.current.triggerTrain();
+        if (data.length > 0) {
+          triggerTrain();
         }
       } catch (err) {
         console.error("Failed to fetch users:", err);
       }
     };
     fetchUsers();
-  }, []);
+  }, [triggerTrain]);
 
   useEffect(() => {
     const user = users.find((u) => u.id === selectedUserId);
@@ -123,7 +85,13 @@ export default function Home() {
           })
         );
 
-        setRefreshKey((k) => k + 1);
+        if (selectedUserId) {
+          setTimeout(() => {
+            // Request new recommendations after persisted like state is updated.
+            // Triggering train here keeps model aligned with latest likes.
+            triggerTrain();
+          }, 0);
+        }
       } catch (err) {
         console.error("Like toggle failed:", err);
         setLikedMovieIds((prev) => {
@@ -134,7 +102,7 @@ export default function Home() {
         });
       }
     },
-    [selectedUserId]
+    [selectedUserId, triggerTrain]
   );
 
   const handleUserCreated = useCallback(
@@ -155,6 +123,9 @@ export default function Home() {
 
   const selectedUser = users.find((u) => u.id === selectedUserId);
   const likedMovies = selectedUser?.liked_movies.filter((m) => m.title) ?? [];
+  const handleRetrainModel = useCallback(() => {
+    triggerTrain();
+  }, [triggerTrain]);
 
   return (
     <div className="flex min-h-screen flex-col bg-zinc-50 dark:bg-zinc-950 lg:flex-row">
@@ -167,14 +138,25 @@ export default function Home() {
 
       <main className="flex-1 overflow-y-auto p-5 lg:p-8">
         <header className="mb-8">
-          <h1 className="text-2xl font-bold tracking-tight text-zinc-900 dark:text-zinc-50">
-            Movie Recommendations
-          </h1>
-          {selectedUser && (
-            <p className="mt-1 text-sm text-zinc-500">
-              Browsing as <span className="font-medium text-indigo-600 dark:text-indigo-400">{selectedUser.name}</span>
-            </p>
-          )}
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+            <div>
+              <h1 className="text-2xl font-bold tracking-tight text-zinc-900 dark:text-zinc-50">
+                Movie Recommendations
+              </h1>
+              {selectedUser && (
+                <p className="mt-1 text-sm text-zinc-500">
+                  Browsing as <span className="font-medium text-indigo-600 dark:text-indigo-400">{selectedUser.name}</span>
+                </p>
+              )}
+            </div>
+            <button
+              onClick={handleRetrainModel}
+              disabled={trainingProgress !== null}
+              className="inline-flex items-center justify-center rounded-lg bg-indigo-600 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-indigo-500 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              {trainingProgress !== null ? "Treinando..." : "Treinar modelo"}
+            </button>
+          </div>
           {trainingProgress !== null && (
             <div className="mt-3 flex items-center gap-3">
               <div className="h-1.5 flex-1 overflow-hidden rounded-full bg-zinc-200 dark:bg-zinc-800">
@@ -192,7 +174,7 @@ export default function Home() {
           userId={selectedUserId}
           likedMovieIds={likedMovieIds}
           onToggleLike={handleToggleLike}
-          refreshKey={refreshKey}
+          isTraining={trainingProgress !== null}
           workerRecommendations={workerRecommendations}
         />
 

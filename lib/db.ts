@@ -11,11 +11,43 @@ const pool = new Pool({
   port: parseInt(process.env.DB_PORT || "5432"),
 });
 
-pool.on("connect", async (client) => {
-  await registerTypes(client);
-});
+let vectorTypesReady = false;
+let vectorTypesInitPromise: Promise<void> | null = null;
 
-export const query = (text: string, params?: unknown[]) =>
-  pool.query(text, params);
+const isMissingVectorTypeError = (error: unknown) =>
+  error instanceof Error &&
+  error.message.toLowerCase().includes("vector type not found");
+
+const ensureVectorTypes = async () => {
+  if (vectorTypesReady) {
+    return;
+  }
+
+  if (!vectorTypesInitPromise) {
+    vectorTypesInitPromise = (async () => {
+      const client = await pool.connect();
+
+      try {
+        await registerTypes(client);
+        vectorTypesReady = true;
+      } catch (error) {
+        if (!isMissingVectorTypeError(error)) {
+          throw error;
+        }
+      } finally {
+        client.release();
+      }
+    })().finally(() => {
+      vectorTypesInitPromise = null;
+    });
+  }
+
+  await vectorTypesInitPromise;
+};
+
+export const query = async (text: string, params?: unknown[]) => {
+  await ensureVectorTypes();
+  return pool.query(text, params);
+};
 
 export const getPool = () => pool;

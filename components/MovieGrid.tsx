@@ -9,10 +9,28 @@ type MovieGridProps = {
   onToggleLike: (movieId: number) => void;
 };
 
+type MovieFilters = {
+  search: string;
+  genre: string;
+  director: string;
+  cast: string;
+  minAgeRating: string;
+  maxAgeRating: string;
+};
+
+const defaultFilters: MovieFilters = {
+  search: "",
+  genre: "",
+  director: "",
+  cast: "",
+  minAgeRating: "",
+  maxAgeRating: "",
+};
+
 export default function MovieGrid({ likedMovieIds, onToggleLike }: MovieGridProps) {
   const [movies, setMovies] = useState<Movie[]>([]);
-  const [search, setSearch] = useState("");
-  const [debouncedSearch, setDebouncedSearch] = useState("");
+  const [filters, setFilters] = useState<MovieFilters>(defaultFilters);
+  const [debouncedFilters, setDebouncedFilters] = useState<MovieFilters>(defaultFilters);
   const [offset, setOffset] = useState(0);
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(false);
@@ -20,11 +38,18 @@ export default function MovieGrid({ likedMovieIds, onToggleLike }: MovieGridProp
 
   useEffect(() => {
     const timer = setTimeout(() => {
-      setDebouncedSearch(search);
+      setDebouncedFilters(filters);
       setOffset(0);
     }, 300);
     return () => clearTimeout(timer);
-  }, [search]);
+  }, [filters]);
+
+  const updateFilter = useCallback(
+    (key: keyof MovieFilters, value: string) => {
+      setFilters((prev) => ({ ...prev, [key]: value }));
+    },
+    []
+  );
 
   const fetchMovies = useCallback(async () => {
     setLoading(true);
@@ -33,7 +58,12 @@ export default function MovieGrid({ likedMovieIds, onToggleLike }: MovieGridProp
         limit: String(limit),
         offset: String(offset),
       });
-      if (debouncedSearch) params.set("search", debouncedSearch);
+      if (debouncedFilters.search) params.set("search", debouncedFilters.search);
+      if (debouncedFilters.genre) params.set("genre", debouncedFilters.genre);
+      if (debouncedFilters.director) params.set("director", debouncedFilters.director);
+      if (debouncedFilters.cast) params.set("cast", debouncedFilters.cast);
+      if (debouncedFilters.minAgeRating) params.set("minAgeRating", debouncedFilters.minAgeRating);
+      if (debouncedFilters.maxAgeRating) params.set("maxAgeRating", debouncedFilters.maxAgeRating);
 
       const res = await fetch(`/api/movies?${params}`);
       const data = await res.json();
@@ -44,7 +74,10 @@ export default function MovieGrid({ likedMovieIds, onToggleLike }: MovieGridProp
     } finally {
       setLoading(false);
     }
-  }, [offset, debouncedSearch]);
+  }, [
+    offset,
+    debouncedFilters,
+  ]);
 
   useEffect(() => {
     fetchMovies();
@@ -55,37 +88,79 @@ export default function MovieGrid({ likedMovieIds, onToggleLike }: MovieGridProp
 
   return (
     <section>
-      <div className="mb-5 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-        <div>
-          <h2 className="text-lg font-bold text-zinc-900 dark:text-zinc-100">
-            Movie Catalog
-          </h2>
-          <p className="text-xs text-zinc-400">
-            {total} movies total
-          </p>
+      <div className="mb-5 space-y-3">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+          <div>
+            <h2 className="text-lg font-bold text-zinc-900 dark:text-zinc-100">
+              Movie Catalog
+            </h2>
+            <p className="text-xs text-zinc-400">
+              {total} movies total
+            </p>
+          </div>
+
+          <div className="relative">
+            <svg
+              className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-zinc-400"
+              xmlns="http://www.w3.org/2000/svg"
+              fill="none"
+              viewBox="0 0 24 24"
+              strokeWidth={2}
+              stroke="currentColor"
+            >
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                d="M21 21l-5.197-5.197m0 0A7.5 7.5 0 105.196 5.196a7.5 7.5 0 0010.607 10.607z"
+              />
+            </svg>
+            <input
+              type="text"
+              placeholder="Search movies..."
+              value={filters.search}
+              onChange={(e) => updateFilter("search", e.target.value)}
+              className="w-full rounded-lg border border-zinc-300 bg-white py-2 pl-9 pr-4 text-sm text-zinc-900 placeholder:text-zinc-400 focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 dark:border-zinc-700 dark:bg-zinc-800 dark:text-zinc-100 dark:placeholder:text-zinc-500 sm:w-72"
+            />
+          </div>
         </div>
 
-        <div className="relative">
-          <svg
-            className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-zinc-400"
-            xmlns="http://www.w3.org/2000/svg"
-            fill="none"
-            viewBox="0 0 24 24"
-            strokeWidth={2}
-            stroke="currentColor"
-          >
-            <path
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              d="M21 21l-5.197-5.197m0 0A7.5 7.5 0 105.196 5.196a7.5 7.5 0 0010.607 10.607z"
-            />
-          </svg>
+        <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-5">
           <input
             type="text"
-            placeholder="Search movies..."
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            className="w-full rounded-lg border border-zinc-300 bg-white py-2 pl-9 pr-4 text-sm text-zinc-900 placeholder:text-zinc-400 focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 dark:border-zinc-700 dark:bg-zinc-800 dark:text-zinc-100 dark:placeholder:text-zinc-500 sm:w-72"
+            placeholder="Filter by genre"
+            value={filters.genre}
+            onChange={(e) => updateFilter("genre", e.target.value)}
+            className="rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm text-zinc-900 placeholder:text-zinc-400 focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 dark:border-zinc-700 dark:bg-zinc-800 dark:text-zinc-100 dark:placeholder:text-zinc-500"
+          />
+          <input
+            type="number"
+            min={0}
+            placeholder="Min age rating"
+            value={filters.minAgeRating}
+            onChange={(e) => updateFilter("minAgeRating", e.target.value)}
+            className="rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm text-zinc-900 placeholder:text-zinc-400 focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 dark:border-zinc-700 dark:bg-zinc-800 dark:text-zinc-100 dark:placeholder:text-zinc-500"
+          />
+          <input
+            type="number"
+            min={0}
+            placeholder="Max age rating"
+            value={filters.maxAgeRating}
+            onChange={(e) => updateFilter("maxAgeRating", e.target.value)}
+            className="rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm text-zinc-900 placeholder:text-zinc-400 focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 dark:border-zinc-700 dark:bg-zinc-800 dark:text-zinc-100 dark:placeholder:text-zinc-500"
+          />
+          <input
+            type="text"
+            placeholder="Filter by director"
+            value={filters.director}
+            onChange={(e) => updateFilter("director", e.target.value)}
+            className="rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm text-zinc-900 placeholder:text-zinc-400 focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 dark:border-zinc-700 dark:bg-zinc-800 dark:text-zinc-100 dark:placeholder:text-zinc-500"
+          />
+          <input
+            type="text"
+            placeholder="Cast names (comma separated)"
+            value={filters.cast}
+            onChange={(e) => updateFilter("cast", e.target.value)}
+            className="rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm text-zinc-900 placeholder:text-zinc-400 focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 dark:border-zinc-700 dark:bg-zinc-800 dark:text-zinc-100 dark:placeholder:text-zinc-500"
           />
         </div>
       </div>

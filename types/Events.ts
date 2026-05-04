@@ -1,102 +1,103 @@
 import { events } from "./constants";
+import type {
+    UIEventPayloadMap,
+    ProgressUpdateEventPayload,
+    RecommendEventPayload,
+    RecommendationsReadyEventPayload,
+    TrainingCompleteEventPayload,
+    TrainingLogEventPayload,
+} from "./worker";
 
 export default class Events {
-    onTrainingComplete(callback: (data: unknown) => void) {
-        document.addEventListener(events.trainingComplete, (event) => {
-            return callback((event as CustomEvent).detail);
-        });
-    }
-    dispatchTrainingComplete(data: unknown) {
-        document.dispatchEvent(new CustomEvent(events.trainingComplete, { detail: data }));
-    }
-
-    onRecommend(callback: (data: unknown) => void) {
-        document.addEventListener(events.recommend, (event) => {
-            return callback((event as CustomEvent).detail);
-        });
-    }
-    dispatchRecommend(data: unknown) {
-        document.dispatchEvent(new CustomEvent(events.recommend, { detail: data }));
+    private on<K extends keyof UIEventPayloadMap>(
+        eventName: K,
+        callback: (data: UIEventPayloadMap[K]) => void
+    ) {
+        const handler = (event: Event) => {
+            callback((event as CustomEvent<UIEventPayloadMap[K]>).detail);
+        };
+        document.addEventListener(eventName, handler);
+        return () => document.removeEventListener(eventName, handler);
     }
 
-    onRecommendationsReady(callback: (data: unknown) => void) {
-        document.addEventListener(events.recommendationsReady, (event) => {
-            return callback((event as CustomEvent).detail);
-        });
-    }
-    dispatchRecommendationsReady(data: unknown) {
-        document.dispatchEvent(new CustomEvent(events.recommendationsReady, { detail: data }));
+    private dispatch<K extends keyof UIEventPayloadMap>(eventName: K, data: UIEventPayloadMap[K]) {
+        document.dispatchEvent(new CustomEvent(eventName, { detail: data }));
     }
 
-    onTrainModel(callback: (data: unknown) => void) {
-        document.addEventListener(events.modelTrain, (event) => {
-            return callback((event as CustomEvent).detail);
-        });
+    onTrainingComplete(callback: (data: TrainingCompleteEventPayload) => void) {
+        return this.on(events.trainingComplete, callback);
     }
-    dispatchTrainModel(data: unknown) {
-        document.dispatchEvent(new CustomEvent(events.modelTrain, { detail: data }));
+    dispatchTrainingComplete(data: TrainingCompleteEventPayload) {
+        this.dispatch(events.trainingComplete, data);
     }
 
-    onTFVisLogs(callback: (data: unknown) => void) {
-        document.addEventListener(events.tfvisLogs, (event) => {
-            return callback((event as CustomEvent).detail);
-        });
+    onRecommend(callback: (data: RecommendEventPayload) => void) {
+        return this.on(events.recommend, callback);
     }
-    dispatchTFVisLogs(data: unknown) {
-        document.dispatchEvent(new CustomEvent(events.tfvisLogs, { detail: data }));
+    dispatchRecommend(data: RecommendEventPayload) {
+        this.dispatch(events.recommend, data);
+    }
+
+    onRecommendationsReady(callback: (data: RecommendationsReadyEventPayload) => void) {
+        return this.on(events.recommendationsReady, callback);
+    }
+    dispatchRecommendationsReady(data: RecommendationsReadyEventPayload) {
+        this.dispatch(events.recommendationsReady, data);
+    }
+
+    onTrainModel(callback: (data: undefined) => void) {
+        return this.on(events.modelTrain, callback);
+    }
+    dispatchTrainModel() {
+        this.dispatch(events.modelTrain, undefined);
+    }
+
+    onTFVisLogs(callback: (data: TrainingLogEventPayload) => void) {
+        return this.on(events.tfvisLogs, callback);
+    }
+    dispatchTFVisLogs(data: TrainingLogEventPayload) {
+        this.dispatch(events.tfvisLogs, data);
     }
 
     onTFVisorData(callback: (data: unknown) => void) {
-        document.addEventListener(events.tfvisData, (event) => {
-            return callback((event as CustomEvent).detail);
-        });
+        return this.on(events.tfvisData, callback);
     }
     dispatchTFVisorData(data: unknown) {
-        document.dispatchEvent(new CustomEvent(events.tfvisData, { detail: data }));
+        this.dispatch(events.tfvisData, data);
     }
 
-    onProgressUpdate(callback: (data: any) => void) {
-        document.addEventListener(events.modelProgressUpdate, (event) => {
-            return callback((event as CustomEvent).detail);
-        });
+    onProgressUpdate(callback: (data: ProgressUpdateEventPayload) => void) {
+        return this.on(events.modelProgressUpdate, callback);
     }
-    dispatchProgressUpdate(progressData: unknown) {
-        document.dispatchEvent(new CustomEvent(events.modelProgressUpdate, { detail: progressData }));
+    dispatchProgressUpdate(progressData: ProgressUpdateEventPayload) {
+        this.dispatch(events.modelProgressUpdate, progressData);
     }
 
     onUserSelected(callback: (data: unknown) => void) {
-        document.addEventListener(events.userSelected, (event) => {
-            return callback((event as CustomEvent).detail);
-        });
+        return this.on(events.userSelected, callback);
     }
     dispatchUserSelected(data: unknown) {
-        document.dispatchEvent(new CustomEvent(events.userSelected, { detail: data }));
+        this.dispatch(events.userSelected, data);
     }
 
     onUsersUpdated(callback: (data: unknown) => void) {
-        document.addEventListener(events.usersUpdated, (event) => {
-            return callback((event as CustomEvent).detail);
-        });
+        return this.on(events.usersUpdated, callback);
     }
     dispatchUsersUpdated(data: unknown) {
-        document.dispatchEvent(new CustomEvent(events.usersUpdated, { detail: data }));
+        this.dispatch(events.usersUpdated, data);
     }
 
     onPurchaseAdded(callback: (data: unknown) => void) {
-        document.addEventListener(events.purchaseAdded, (event) => {
-            return callback((event as CustomEvent).detail);
-        });
+        return this.on(events.purchaseAdded, callback);
     }
     dispatchPurchaseAdded(data: unknown) {
-        document.dispatchEvent(new CustomEvent(events.purchaseAdded, { detail: data }));
+        this.dispatch(events.purchaseAdded, data);
     }
 
     onPurchaseRemoved(callback: (data: unknown) => void) {
-        document.addEventListener(events.purchaseRemoved, (event) => {
-            return callback((event as CustomEvent).detail);
-        });
+        return this.on(events.purchaseRemoved, callback);
     }
     dispatchEventPurchaseRemoved(data: unknown) {
-        document.dispatchEvent(new CustomEvent(events.purchaseRemoved, { detail: data }));
+        this.dispatch(events.purchaseRemoved, data);
     }
 }
